@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Geometry Web Dash</title>
+    <!-- Poki SDK -->
+    <script src="https://poki.com"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            background-color: #111;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            color: white;
+            user-select: none;
+            overflow: hidden;
+        }
+
+        h1 {
+            margin-bottom: 10px;
+            letter-spacing: 2px;
+            text-transform: uppercase;
+            color: #00ffcc;
+            font-size: clamp(1.2rem, 4vw, 2rem);
+        }
+
+        #game-container {
+            position: relative;
+            width: 800px;
+            max-width: 95vw;
+            height: 300px;
+            background: linear-gradient(180deg, #0b192c 0%, #1e3e62 100%);
+            border: 4px solid #00ffcc;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.4);
+            cursor: pointer;
+        }
+
+        #ground {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 50px;
+            background-color: #09122c;
+            border-top: 3px solid #00ffcc;
+        }
+
+        #player {
+            position: absolute;
+            bottom: 50px;
+            left: 100px;
+            width: 40px;
+            height: 40px;
+            background-color: #ffde00;
+            border: 3px solid #000;
+            box-shadow: inset 0 0 0 4px #ff8800;
+            display: flex;
+            justify-content: space-around;
+            align-items: center;
+        }
+
+        .eye {
+            width: 8px;
+            height: 8px;
+            background-color: #000;
+        }
+
+        .spike {
+            position: absolute;
+            bottom: 50px;
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-bottom: 40px solid #ff2a2a;
+        }
+
+        #score {
+            position: absolute;
+            top: 15px;
+            right: 20px;
+            font-size: 24px;
+            font-weight: bold;
+        }
+
+        #message {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 22px;
+            font-weight: bold;
+            text-align: center;
+            background: rgba(0, 0, 0, 0.8);
+            padding: 15px 25px;
+            border-radius: 8px;
+            border: 2px solid #00ffcc;
+            width: 80%;
+            max-width: 450px;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Geometry Web Dash </h1>
+    <div id="game-container">
+        <div id="score">Score: 0</div>
+        <div id="message">Press SPACE or CLICK to Jump</div>
+        <div id="player">
+            <div class="eye"></div>
+            <div class="eye"></div>
+        </div>
+        <div id="ground"></div>
+    </div>
+
+    <script>
+        const gameContainer = document.getElementById('game-container');
+        const player = document.getElementById('player');
+        const scoreElement = document.getElementById('score');
+        const messageElement = document.getElementById('message');
+
+        // --- POKI SDK SETUP ---
+        let pokiReady = false;
+        let isAdPlaying = false;
+        let hasStartedFirstGame = false;
+
+        if (window.PokiSDK) {
+            PokiSDK.init().then(() => {
+                pokiReady = true;
+                PokiSDK.gameLoadingFinished();
+            }).catch(() => {
+                pokiReady = false;
+            });
+        }
+
+        // --- GAME VARIABLES ---
+        let isJumping = false;
+        let velocityY = 0;
+        let playerBottom = 50;
+        const gravity = 0.8;
+        const jumpPower = 14;
+        let rotation = 0;
+
+        let isGameOver = false;
+        let isPlaying = false;
+        let score = 0;
+        let gameSpeed = 6;
+        const spikes = new Set();
+        let spawnTimer = 0;
+        let nextSpawnTime = 80;
+
+        // --- CONTROLS & JUMP ---
+        function jump() {
+            if (isAdPlaying) return;
+
+            if (isGameOver) {
+                triggerRestartWithAd();
+                return;
+            }
+
+            if (!isPlaying) {
+                isPlaying = true;
+                messageElement.style.display = 'none';
+                if (pokiReady && !hasStartedFirstGame) {
+                    PokiSDK.gameplayStart();
+                    hasStartedFirstGame = true;
+                }
+            }
+
+            if (!isJumping) {
+                isJumping = true;
+                velocityY = jumpPower;
+            }
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' || e.code === 'ArrowUp') {
+                e.preventDefault();
+                jump();
+            }
+        });
+
+        gameContainer.addEventListener('mousedown', jump);
+        gameContainer.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            jump();
+        }, { passive: false });
+
+        // --- OBSTACLES ---
+        function createSpike() {
+            const startX = gameContainer.clientWidth || 800;
+            const spike = document.createElement('div');
+            spike.classList.add('spike');
+            spike.style.left = startX + 'px';
+            gameContainer.appendChild(spike);
+            spikes.add({ element: spike, x: startX, passed: false });
+        }
+
+        // --- RESTART & POKI COMMERCIAL BREAK ---
+        function triggerRestartWithAd() {
+            if (pokiReady) {
+                isAdPlaying = true;
+                PokiSDK.commercialBreak().then(() => {
+                    isAdPlaying = false;
+                    resetGame();
+                    PokiSDK.gameplayStart();
+                });
+            } else {
+                resetGame();
+            }
+        }
+
+        function resetGame() {
+            isGameOver = false;
+            isPlaying = true;
+            score = 0;
+            gameSpeed = 6;
+            playerBottom = 50;
+            velocityY = 0;
+            rotation = 0;
+            isJumping = false;
+
+            player.style.bottom = playerBottom + 'px';
+            player.style.transform = 'rotate(0deg)';
+            scoreElement.innerText = 'Score: 0';
+            messageElement.style.display = 'none';
+
+            spikes.forEach(s => s.element.remove());
+            spikes.clear();
+            spawnTimer = 0;
+            nextSpawnTime = 80;
+        }
+
+        // --- MAIN GAME LOOP ---
+        function gameLoop() {
+            if (!isPlaying || isGameOver || isAdPlaying) {
+                requestAnimationFrame(gameLoop);
+                return;
+            }
+
+            // 1. Player Physics
+            if (isJumping) {
+                playerBottom += velocityY;
+                velocityY -= gravity;
+                rotation += 5.5;
+
+                if (playerBottom <= 50) {
+                    playerBottom = 50;
+                    isJumping = false;
+                    velocityY = 0;
+                    rotation = Math.round(rotation / 90) * 90;
+                }
+                player.style.bottom = playerBottom + 'px';
+                player.style.transform = 'rotate(' + rotation + 'deg)';
+            }
+
+            // 2. Spawn Spikes
+            spawnTimer++;
+            if (spawnTimer >= nextSpawnTime) {
+                createSpike();
+                spawnTimer = 0;
+                nextSpawnTime = Math.floor(Math.random() * 55) + 55;
+            }
+
+            // 3. Move Spikes & Collision Detection
+            const playerLeft = 106;
+            const playerRight = 134;
+
+            for (const s of spikes) {
+                s.x -= gameSpeed;
+                s.element.style.left = s.x + 'px';
+
+                const spikeLeft = s.x + 10;
+                const spikeRight = s.x + 30;
+                const spikeTop = 82;
+
+                if (playerRight > spikeLeft && playerLeft < spikeRight && playerBottom < spikeTop) {
+                    isGameOver = true;
+                    isPlaying = false;
+                    if (pokiReady) {
+                        PokiSDK.gameplayStop();
+                    }
+                    messageElement.innerText = 'GAME OVER!\nScore: ' + score + '\nClick or press SPACE to retry';
+                    messageElement.style.display = 'block';
+                    break;
+                }
+
+                if (!s.passed && s.x < 100) {
+                    s.passed = true;
+                    score++;
+                    scoreElement.innerText = 'Score: ' + score;
+                    if (score % 5 === 0) gameSpeed += 0.4;
+                }
+
+                if (s.x < -50) {
+                    s.element.remove();
+                    spikes.delete(s);
+                }
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        requestAnimationFrame(gameLoop);
+    </script>
+</body>
+</html>
